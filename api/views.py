@@ -96,7 +96,7 @@ class VerifyEmail(APIView):
             user.is_active = True
             user.save()
             # redirect into your React app’s login route:
-            return redirect('https://ashesionlinemarketplace.me/login')
+            return redirect('https://ashesi-offcampus-online-store.netlify.app/login')
         return Response(
             {"error": "Invalid or expired verification link."},
             status=status.HTTP_400_BAD_REQUEST
