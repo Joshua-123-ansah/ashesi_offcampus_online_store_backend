@@ -149,7 +149,7 @@ class PasswordResetSerializer(serializers.Serializer):
 class FoodSerializer(serializers.ModelSerializer):
     class Meta:
         model = FoodItems
-        fields = ['id','name', 'price','image', 'status']
+        fields = ['id','name', 'price','image', 'status', 'extras']
 
 
 class OrderItemSerializer(serializers.ModelSerializer):

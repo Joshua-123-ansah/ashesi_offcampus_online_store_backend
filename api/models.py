@@ -16,14 +16,11 @@ class FoodItems(models.Model):
     price = models.FloatField()
     image = models.TextField()
     status = models.BooleanField(default=False)
+    extras = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.name
-
-# api/models.py
-from django.conf import settings
-from django.db import models
 
 class Order(models.Model):
     STATUS_RECEIVED        = 'RECEIVED'

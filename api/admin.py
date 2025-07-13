@@ -3,7 +3,7 @@ from .models import FoodItems, Order, OrderItem
 
 @admin.register(FoodItems)
 class FoodItemsAdmin(admin.ModelAdmin):
-    list_display = ('name', 'price','image', 'status')  # adjust to your fields
+    list_display = ('name', 'price','image', 'status', 'extras')  # adjust to your fields
     search_fields = ('status',)
 
 

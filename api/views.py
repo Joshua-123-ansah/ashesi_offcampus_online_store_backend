@@ -96,18 +96,12 @@ class VerifyEmail(APIView):
             user.is_active = True
             user.save()
             # redirect into your React app’s login route:
-            return redirect('http://localhost:3000/login')
+            return redirect('https://ashesionlinemarketplace.me/login')
         return Response(
             {"error": "Invalid or expired verification link."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-# class CreateUserView(generics.CreateAPIView):
-#     queryset = User.objects.all()
-#     serializer_class = UserSerializer
-#     permission_classes = [AllowAny]
-
-#
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
     GET  /api/user/profile/  → fetch all fields (username read-only)

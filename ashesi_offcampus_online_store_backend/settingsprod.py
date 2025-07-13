@@ -30,7 +30,12 @@ SECRET_KEY = os.environ.get('SECRET_KEY','')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ['ashesionlinemarketplace.me', 'www.ashesionlinemarketplace.me']
+
+CSRF_TRUSTED_ORIGINS = [
+    'https://ashesionlinemarketplace.me',
+    'https://www.ashesionlinemarketplace.me'
+]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -70,6 +75,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    'django.middleware.csrf.CsrfViewMiddleware',
 ]
 
 ROOT_URLCONF = "ashesi_offcampus_online_store_backend.urls"
@@ -99,7 +105,7 @@ WSGI_APPLICATION = "ashesi_offcampus_online_store_backend.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql_psycopg2",
-        "NAME": " ashesi_online_store_backend",
+        "NAME": "ashesi_online_store_backend",
         "PASSWORD":  os.environ.get('DB_PASSWORD', ''),
         "USER":"ashesi_online_store_backenduser",
         "HOST": "localhost",
@@ -142,7 +148,16 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = "static/"
+# Static files
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # where collectstatic will dump files
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'ashesi_offcampus_online_store_backend', 'static'),
+]
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -162,3 +177,6 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'owusuja500@gmail.com'
 EMAIL_HOST_PASSWORD = 'xgdb yygh mvsw smut'
 DEFAULT_FROM_EMAIL = 'owusuja500@gmail.com'
+
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
