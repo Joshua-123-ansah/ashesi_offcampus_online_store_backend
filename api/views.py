@@ -23,6 +23,10 @@ from django.utils.http import urlsafe_base64_decode
 from django.shortcuts import redirect
 
 from .serializers import PasswordResetSerializer
+from .models import Payment
+from .serializers import PaymentInitiateSerializer
+import requests
+from django.conf import settings as django_settings
 
 # Create your views here.
 # request --> response. So we will say it is a request handler.
@@ -189,3 +193,81 @@ class OrderStatusView(generics.RetrieveAPIView):
             id=self.kwargs['order_id'],
             user=self.request.user
         )
+
+class PaymentInitiateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PaymentInitiateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        user = request.user
+        order = data["order"]
+        amount = int(float(data["amount"]) * 100)  # Paystack expects amount in kobo/pesewas
+        payment_method = data["payment_method"]
+        email = data["email"]
+        phone = data.get("phone", "")
+
+        # Prepare Paystack payload
+        paystack_data = {
+            "amount": amount,
+            "email": email,
+            "currency": "GHS",
+            # Set callback_url to frontend payment-complete page
+            "callback_url": "https://ashesi-offcampus-online-store.netlify.app/verify",  # <-- update this to your actual frontend domain
+        }
+        if payment_method == "momo":
+            paystack_data["channels"] = ["mobile_money"]
+            paystack_data["mobile_money"] = {"phone": phone, "provider": "mtn"}  # Only MTN for now
+        else:
+            paystack_data["channels"] = ["card"]
+
+        headers = {
+            "Authorization": f"Bearer {django_settings.PAYSTACK_SECRET_KEY}",
+            "Content-Type": "application/json",
+        }
+        response = requests.post(f"{django_settings.PAYSTACK_BASE_URL}/transaction/initialize", json=paystack_data, headers=headers)
+        resp_json = response.json()
+        if not resp_json.get("status"):
+            return Response({"error": resp_json.get("message", "Paystack error")}, status=400)
+        paystack_ref = resp_json["data"]["reference"]
+        payment_url = resp_json["data"]["authorization_url"]
+
+        # Create Payment record
+        Payment.objects.create(
+            user=user,
+            order=order,
+            amount=data["amount"],
+            payment_method=payment_method,
+            status="pending",
+            paystack_reference=paystack_ref,
+        )
+        return Response({"payment_url": payment_url, "reference": paystack_ref})
+
+class PaymentVerifyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        reference = request.data.get("reference")
+        if not reference:
+            return Response({"error": "Reference is required."}, status=400)
+        try:
+            payment = Payment.objects.get(paystack_reference=reference, user=request.user)
+        except Payment.DoesNotExist:
+            return Response({"error": "Payment not found."}, status=404)
+        headers = {
+            "Authorization": f"Bearer {django_settings.PAYSTACK_SECRET_KEY}",
+        }
+        verify_url = f"{django_settings.PAYSTACK_BASE_URL}/transaction/verify/{reference}"
+        resp = requests.get(verify_url, headers=headers)
+        resp_json = resp.json()
+        if resp_json.get("status") and resp_json["data"]["status"] == "success":
+            payment.status = "success"
+            payment.save()
+            payment.order.status = Order.STATUS_RECEIVED  # or update as needed
+            payment.order.save()
+            return Response({"status": "success"})
+        else:
+            payment.status = "failed"
+            payment.save()
+            return Response({"status": "failed", "message": resp_json.get("message", "Payment failed.")}, status=400)

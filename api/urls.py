@@ -1,6 +1,6 @@
 from django.urls import path
 from . import views
-from .views import OrderListCreateView, OrderStatusView, PasswordResetView
+from .views import OrderListCreateView, OrderStatusView, PasswordResetView, PaymentInitiateView, PaymentVerifyView
 
 urlpatterns = [
     path("foodItems/", views.FoodListView.as_view(), name="foodItem-list"),
@@ -12,4 +12,6 @@ urlpatterns = [
           name='order-status'
         ),
     path('password-reset/', PasswordResetView.as_view(), name='password-reset'),
+    path('payments/initiate/', PaymentInitiateView.as_view(), name='payment-initiate'),
+    path('payments/verify/', PaymentVerifyView.as_view(), name='payment-verify'),
 ]

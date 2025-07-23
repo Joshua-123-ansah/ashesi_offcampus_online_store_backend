@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 import re
 from rest_framework import serializers
 from api.models import FoodItems, UserProfile
-from .models import Order, OrderItem
+from .models import Order, OrderItem, Payment
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -196,7 +196,11 @@ class OrderSerializer(serializers.ModelSerializer):
             )
             total += line_price
 
-        # 3) Save the total and return
+        # 3) Add delivery fee
+        delivery_fee = 5
+        total += delivery_fee
+
+        # 4) Save the total and return
         order.total_price = total
         order.save()
         return order
@@ -209,3 +213,22 @@ class OrderStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Order
         fields = ['id', 'status']
+
+
+class PaymentInitiateSerializer(serializers.Serializer):
+    order_id = serializers.IntegerField()
+    payment_method = serializers.ChoiceField(choices=["card", "momo"])
+    email = serializers.EmailField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    phone = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        user = self.context['request'].user
+        try:
+            order = Order.objects.get(id=data['order_id'], user=user)
+        except Order.DoesNotExist:
+            raise serializers.ValidationError("Order not found or does not belong to user.")
+        if order.total_price != data['amount']:
+            raise serializers.ValidationError("Amount does not match order total.")
+        data['order'] = order
+        return data

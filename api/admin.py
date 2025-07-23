@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import FoodItems, Order, OrderItem
+from .models import FoodItems, Order, OrderItem, Payment
 
 @admin.register(FoodItems)
 class FoodItemsAdmin(admin.ModelAdmin):
@@ -23,6 +23,13 @@ class OrderAdmin(admin.ModelAdmin):
 class OrderItemAdmin(admin.ModelAdmin):
     list_display  = ('order', 'food_item', 'quantity', 'price')
     search_fields = ('food_item__name',)
+
+@admin.register(Payment)
+class PaymentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'order', 'amount', 'payment_method', 'status', 'paystack_reference', 'created_at')
+    list_filter = ('status', 'payment_method', 'created_at')
+    search_fields = ('user__username', 'order__id', 'paystack_reference')
+
 
 # —–– or, equivalently —––—
 # admin.site.register(FoodItems, FoodItemsAdmin)
