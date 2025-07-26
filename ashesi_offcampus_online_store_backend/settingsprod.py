@@ -183,5 +183,8 @@ PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY','')
 PAYSTACK_PUBLIC_KEY = os.environ.get('PAYSTACK_PUBLIC_KEY','')
 PAYSTACK_BASE_URL = "https://api.paystack.co" 
 
+# Frontend URL for production
+FRONTEND_URL = "https://ashesi-offcampus-online-store.netlify.app"
+
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True

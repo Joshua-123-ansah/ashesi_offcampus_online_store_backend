@@ -99,8 +99,8 @@ class VerifyEmail(APIView):
         if user and default_token_generator.check_token(user, token):
             user.is_active = True
             user.save()
-            # redirect into your React app’s login route:
-            return redirect('https://ashesi-offcampus-online-store.netlify.app/login')
+            # redirect into your React app's signup route using settings with verified parameter:
+            return redirect(f"{django_settings.FRONTEND_URL}/signup?verified=true")
         return Response(
             {"error": "Invalid or expired verification link."},
             status=status.HTTP_400_BAD_REQUEST
@@ -213,8 +213,8 @@ class PaymentInitiateView(APIView):
             "amount": amount,
             "email": email,
             "currency": "GHS",
-            # Set callback_url to frontend payment-complete page
-            "callback_url": "https://ashesi-offcampus-online-store.netlify.app/verify",  # <-- update this to your actual frontend domain
+            # Set callback_url to frontend payment-complete page using settings
+            "callback_url": f"{django_settings.FRONTEND_URL}/payment/verify",
         }
         if payment_method == "momo":
             paystack_data["channels"] = ["mobile_money"]

@@ -165,3 +165,6 @@ DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
 PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY')
 PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY')
 PAYSTACK_BASE_URL = "https://api.paystack.co"
+
+# Frontend URL for local development
+FRONTEND_URL = "http://localhost:3000"
