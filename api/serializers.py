@@ -27,10 +27,11 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
     def validate_password(self, value):
-        regex = re.compile(r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$')
+        # Require at least 8 chars with uppercase, lowercase, number, and symbol
+        regex = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$')
         if not regex.match(value):
             raise serializers.ValidationError(
-                "Password must be at least 8 characters and include letters and numbers."
+                "Password must be at least 8 characters and include uppercase, lowercase, number, and symbol."
             )
         return value
 
@@ -107,7 +108,8 @@ class PasswordResetSerializer(serializers.Serializer):
     new_password     = serializers.CharField(write_only=True, required=False)
     confirm_password = serializers.CharField(write_only=True, required=False)
 
-    password_regex = re.compile(r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$')
+    # Require at least 8 chars with uppercase, lowercase, number, and symbol
+    password_regex = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$')
 
     def validate_email(self, value):
         if not User.objects.filter(email=value).exists():
@@ -129,7 +131,7 @@ class PasswordResetSerializer(serializers.Serializer):
         pwd = data['new_password']
         if not self.password_regex.match(pwd):
             raise serializers.ValidationError({
-                "new_password": "Password must be at least 8 characters and include letters and numbers."
+                "new_password": "Password must be at least 8 characters and include uppercase, lowercase, number, and symbol."
             })
 
         # Match check
