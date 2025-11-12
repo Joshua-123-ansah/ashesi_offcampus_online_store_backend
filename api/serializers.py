@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from rest_framework import serializers
 from api.models import FoodItems, UserProfile
 from .models import Order, OrderItem, Payment
@@ -59,7 +60,8 @@ class UserSerializer(serializers.ModelSerializer):
             user                  = user,
             phone_number          = phone,
             hostel_or_office_name = hostel,
-            room_or_office_number = room
+            room_or_office_number = room,
+            role                  = UserProfile.ROLE_STUDENT,
         )
 
         return user
@@ -75,6 +77,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     phone_number           = serializers.CharField(required=False)
     hostel_or_office_name  = serializers.CharField(required=False)
     room_or_office_number  = serializers.CharField(required=False)
+    role                   = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES, required=False)
 
     class Meta:
         model  = UserProfile
@@ -86,6 +89,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'phone_number',
             'hostel_or_office_name',
             'room_or_office_number',
+            'role',
         ]
 
     def update(self, instance, validated_data):
@@ -97,8 +101,21 @@ class UserProfileSerializer(serializers.ModelSerializer):
         user.save()
 
         # 2) update profile fields
+        role = validated_data.pop('role', None)
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
+
+        request = self.context.get('request')
+        if role is not None:
+            can_assign = (
+                request
+                and getattr(request.user, 'userprofile', None)
+                and request.user.userprofile.is_super_admin
+            )
+            if not can_assign:
+                raise serializers.ValidationError({"role": "You do not have permission to change roles."})
+            instance.role = role
+
         instance.save()
 
         return instance
@@ -156,15 +173,18 @@ class FoodSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     food_item = serializers.PrimaryKeyRelatedField(queryset=FoodItems.objects.all())
+    food_item_detail = FoodSerializer(source='food_item', read_only=True)
 
     class Meta:
         model  = OrderItem
-        fields = ['food_item', 'quantity']
+        fields = ['food_item', 'quantity', 'price', 'food_item_detail']
+        read_only_fields = ['price', 'food_item_detail']
 
 
 class OrderSerializer(serializers.ModelSerializer):
     items       = OrderItemSerializer(many=True, write_only=True)
     order_items = OrderItemSerializer(source='items', many=True, read_only=True)
+    customer    = serializers.SerializerMethodField()
 
     class Meta:
         model  = Order
@@ -172,10 +192,12 @@ class OrderSerializer(serializers.ModelSerializer):
             'id',
             'created_at',
             'total_price',
+            'status',
+            'customer',
             'items',       # for POST
             'order_items', # for GET
         ]
-        read_only_fields = ['id', 'created_at', 'total_price', 'order_items']
+        read_only_fields = ['id', 'created_at', 'total_price', 'order_items', 'status', 'customer']
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')
@@ -185,11 +207,12 @@ class OrderSerializer(serializers.ModelSerializer):
         order = Order.objects.create(user=user)
 
         # 2) Populate the line items & tally total
-        total = 0
+        total = Decimal('0.00')
         for item in items_data:
             food = item['food_item']
             qty  = item['quantity']
-            line_price = food.price * qty
+            food_price = Decimal(str(food.price))
+            line_price = (food_price * Decimal(qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             OrderItem.objects.create(
                 order     = order,
                 food_item = food,
@@ -199,13 +222,52 @@ class OrderSerializer(serializers.ModelSerializer):
             total += line_price
 
         # 3) Add delivery fee
-        delivery_fee = 5
+        if total > Decimal('150.00'):
+            delivery_fee = Decimal('0.00')
+        else:
+            delivery_fee = Decimal('5.00')
         total += delivery_fee
 
         # 4) Save the total and return
-        order.total_price = total
-        order.save()
+        order.total_price = total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        order.save(update_fields=['total_price'])
         return order
+
+    def get_customer(self, obj):
+        request = self.context.get('request')
+        try:
+            profile = obj.user.userprofile
+            role = profile.role
+        except UserProfile.DoesNotExist:
+            profile = None
+            role = None
+
+        if request and hasattr(request, 'user'):
+            if obj.user == request.user:
+                return {
+                    "id": obj.user.id,
+                    "username": obj.user.username,
+                    "first_name": obj.user.first_name,
+                    "last_name": obj.user.last_name,
+                    "role": role,
+                }
+
+            requester_profile = getattr(request.user, 'userprofile', None)
+            if requester_profile and requester_profile.is_staff_role:
+                return {
+                    "id": obj.user.id,
+                    "username": obj.user.username,
+                    "first_name": obj.user.first_name,
+                    "last_name": obj.user.last_name,
+                    "role": role,
+                }
+        return None
+
+
+class OrderUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ['status']
 
 
 class OrderStatusSerializer(serializers.ModelSerializer):
@@ -231,6 +293,6 @@ class PaymentInitiateSerializer(serializers.Serializer):
         except Order.DoesNotExist:
             raise serializers.ValidationError("Order not found or does not belong to user.")
         if order.total_price != data['amount']:
-            raise serializers.ValidationError("Amount does not match order total.")
+            raise serializers.ValidationError(f"Amount does not match order total. {order.total_price} {data['amount']}")
         data['order'] = order
         return data

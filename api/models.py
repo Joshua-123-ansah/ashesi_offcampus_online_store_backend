@@ -2,13 +2,34 @@ from django.conf import settings
 from django.db import models
 
 class UserProfile(models.Model):
+    ROLE_SUPER_ADMIN = 'super_admin'
+    ROLE_EMPLOYEE    = 'employee'
+    ROLE_COOK        = 'cook'
+    ROLE_STUDENT     = 'student'
+
+    ROLE_CHOICES = [
+        (ROLE_SUPER_ADMIN, 'Super Admin'),
+        (ROLE_EMPLOYEE,    'Employee'),
+        (ROLE_COOK,        'Cook'),
+        (ROLE_STUDENT,     'Student'),
+    ]
+
     user                  = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     phone_number          = models.CharField(max_length=20)
     hostel_or_office_name = models.CharField(max_length=255)
     room_or_office_number = models.CharField(max_length=50)
+    role                  = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_STUDENT)
 
     def __str__(self):
-        return f"{self.user} profile"
+        return f"{self.user} profile ({self.role})"
+
+    @property
+    def is_super_admin(self):
+        return self.role == self.ROLE_SUPER_ADMIN
+
+    @property
+    def is_staff_role(self):
+        return self.role in {self.ROLE_SUPER_ADMIN, self.ROLE_EMPLOYEE, self.ROLE_COOK}
 
 
 class FoodItems(models.Model):
