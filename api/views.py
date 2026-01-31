@@ -5,10 +5,14 @@ from rest_framework import generics, status
 from ashesi_offcampus_online_store_backend import settings
 from ashesi_offcampus_online_store_backend.settings import EMAIL_HOST_PASSWORD
 from .serializers import UserProfileSerializer
-from .models import FoodItems, UserProfile, Order, OrderItem
+from .models import FoodItems, UserProfile, Order, OrderItem, Shop, ElectronicsItems, GroceryItems
 from .serializers import (
     UserSerializer,
     FoodSerializer,
+    ElectronicsSerializer,
+    GrocerySerializer,
+    ShopSerializer,
+    ShopListSerializer,
     OrderSerializer,
     OrderStatusSerializer,
     OrderUpdateSerializer,
@@ -30,10 +34,10 @@ from django.shortcuts import redirect
 from .serializers import PasswordResetSerializer
 from .models import Payment
 from .serializers import PaymentInitiateSerializer
-from .permissions import IsSuperAdmin, IsStaffMember
+from .permissions import IsSuperAdmin, IsStaffMember, IsShopManager
 import requests
 from django.conf import settings as django_settings
-from django.db.models import Sum, Avg
+from django.db.models import Sum, Avg, Q
 from django.utils import timezone
 from datetime import datetime, time
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -163,22 +167,197 @@ class PasswordResetView(generics.GenericAPIView):
 
 
 class FoodListView(generics.ListAPIView):
-    queryset = FoodItems.objects.filter(status=True)
-    serializer_class = FoodSerializer
+    """
+    GET /api/foodItems/ → list all active items (food, electronics, or grocery) based on shop_id
+    Optional query param: ?shop_id=<id> to filter by shop
+    Returns items from FoodItems, ElectronicsItems, or GroceryItems based on shop type
+    """
     authentication_classes = []
     permission_classes = [AllowAny]
 
+    def get_serializer_class(self):
+        shop_id = self.request.query_params.get('shop_id')
+        if shop_id:
+            try:
+                shop = Shop.objects.get(id=shop_id, is_active=True)
+                shop_name_lower = shop.name.lower()
+                if 'tech' in shop_name_lower or 'electronics' in shop_name_lower:
+                    return ElectronicsSerializer
+                elif 'giyark' in shop_name_lower or 'mart' in shop_name_lower or 'grocery' in shop_name_lower:
+                    return GrocerySerializer
+            except Shop.DoesNotExist:
+                pass
+        # Default to FoodSerializer for Cassa Bella or if no shop_id
+        return FoodSerializer
+
+    def get_queryset(self):
+        shop_id = self.request.query_params.get('shop_id')
+        
+        if shop_id:
+            try:
+                shop = Shop.objects.get(id=shop_id, is_active=True)
+                shop_name_lower = shop.name.lower()
+                
+                if 'tech' in shop_name_lower or 'electronics' in shop_name_lower:
+                    # Best Tech Point - return electronics items
+                    return ElectronicsItems.objects.filter(shop=shop, status=True).select_related('shop')
+                elif 'giyark' in shop_name_lower or 'mart' in shop_name_lower or 'grocery' in shop_name_lower:
+                    # Giyark Mini Mart - return grocery items
+                    return GroceryItems.objects.filter(shop=shop, status=True).select_related('shop')
+                else:
+                    # Cassa Bella or other - return food items
+                    return FoodItems.objects.filter(shop=shop, status=True).select_related('shop')
+            except Shop.DoesNotExist:
+                return FoodItems.objects.none()
+        
+        # Default: return food items (for backward compatibility)
+        return FoodItems.objects.filter(status=True).select_related('shop')
+
 
 class FoodAdminListCreateView(generics.ListCreateAPIView):
-    queryset = FoodItems.objects.all().order_by('name')
+    """
+    GET  /api/foodItems/manage/ → list all food items (filtered by shop for shop managers)
+    POST /api/foodItems/manage/ → create a new food item
+    """
     serializer_class = FoodSerializer
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = FoodItems.objects.all().select_related('shop').order_by('name')
+        try:
+            profile = self.request.user.userprofile
+            shop_id = self.request.query_params.get('shop_id')
+            
+            if shop_id:
+                # If shop_id is provided, filter by it (for both super_admin and shop_manager)
+                try:
+                    shop_id_int = int(shop_id)
+                    queryset = queryset.filter(shop_id=shop_id_int)
+                except (ValueError, TypeError):
+                    # Invalid shop_id, return empty queryset
+                    queryset = queryset.none()
+            elif profile.is_shop_manager and profile.shop:
+                # Shop managers without shop_id param see only their assigned shop
+                queryset = queryset.filter(shop=profile.shop)
+            # Super admin without shop_id sees all items
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
 
 
 class FoodAdminDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = FoodItems.objects.all()
+    """
+    GET    /api/foodItems/manage/<id>/ → retrieve food item
+    PATCH  /api/foodItems/manage/<id>/ → update food item
+    DELETE /api/foodItems/manage/<id>/ → delete food item
+    """
     serializer_class = FoodSerializer
-    permission_classes = [IsAuthenticated, IsSuperAdmin]
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = FoodItems.objects.all().select_related('shop')
+        # Shop managers can only manage items from their shop
+        try:
+            profile = self.request.user.userprofile
+            if profile.is_shop_manager and profile.shop:
+                queryset = queryset.filter(shop=profile.shop)
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
+
+
+class ElectronicsAdminListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/electronics/manage/ → list all electronics items (filtered by shop for shop managers)
+    POST /api/electronics/manage/ → create a new electronics item
+    """
+    serializer_class = ElectronicsSerializer
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = ElectronicsItems.objects.all().select_related('shop').order_by('name')
+        try:
+            profile = self.request.user.userprofile
+            shop_id = self.request.query_params.get('shop_id')
+            
+            if shop_id:
+                # If shop_id is provided, filter by it (for both super_admin and shop_manager)
+                queryset = queryset.filter(shop_id=shop_id)
+            elif profile.is_shop_manager and profile.shop:
+                # Shop managers without shop_id param see only their assigned shop
+                queryset = queryset.filter(shop=profile.shop)
+            # Super admin without shop_id sees all items
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
+
+
+class ElectronicsAdminDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/electronics/manage/<id>/ → retrieve electronics item
+    PATCH  /api/electronics/manage/<id>/ → update electronics item
+    DELETE /api/electronics/manage/<id>/ → delete electronics item
+    """
+    serializer_class = ElectronicsSerializer
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = ElectronicsItems.objects.all().select_related('shop')
+        # Shop managers can only manage items from their shop
+        try:
+            profile = self.request.user.userprofile
+            if profile.is_shop_manager and profile.shop:
+                queryset = queryset.filter(shop=profile.shop)
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
+
+
+class GroceryAdminListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/groceries/manage/ → list all grocery items (filtered by shop for shop managers)
+    POST /api/groceries/manage/ → create a new grocery item
+    """
+    serializer_class = GrocerySerializer
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = GroceryItems.objects.all().select_related('shop').order_by('name')
+        try:
+            profile = self.request.user.userprofile
+            shop_id = self.request.query_params.get('shop_id')
+            
+            if shop_id:
+                # If shop_id is provided, filter by it (for both super_admin and shop_manager)
+                queryset = queryset.filter(shop_id=shop_id)
+            elif profile.is_shop_manager and profile.shop:
+                # Shop managers without shop_id param see only their assigned shop
+                queryset = queryset.filter(shop=profile.shop)
+            # Super admin without shop_id sees all items
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
+
+
+class GroceryAdminDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/groceries/manage/<id>/ → retrieve grocery item
+    PATCH  /api/groceries/manage/<id>/ → update grocery item
+    DELETE /api/groceries/manage/<id>/ → delete grocery item
+    """
+    serializer_class = GrocerySerializer
+    permission_classes = [IsAuthenticated, IsShopManager]
+
+    def get_queryset(self):
+        queryset = GroceryItems.objects.all().select_related('shop')
+        # Shop managers can only manage items from their shop
+        try:
+            profile = self.request.user.userprofile
+            if profile.is_shop_manager and profile.shop:
+                queryset = queryset.filter(shop=profile.shop)
+        except UserProfile.DoesNotExist:
+            pass
+        return queryset
 
 
 class OrderListCreateView(generics.ListCreateAPIView):
@@ -191,7 +370,11 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         # only your own orders
-        return Order.objects.filter(user=self.request.user).prefetch_related('items__food_item')
+        return Order.objects.filter(user=self.request.user).select_related('shop').prefetch_related(
+            'items__food_item',
+            'items__electronics_item',
+            'items__grocery_item'
+        )
 
     def perform_create(self, serializer):
         # attach the user context so serializer.create() can read it
@@ -200,17 +383,40 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
 class StaffOrderListView(generics.ListAPIView):
     """
-    GET /api/orders/manage/ → list all orders for staff (super admin, employee, cook)
-    Supports optional filtering by status (?status=RECEIVED).
+    GET /api/orders/manage/ → list all orders for staff (super admin, employee, cook, shop manager)
+    Supports optional filtering by status (?status=RECEIVED) and shop (?shop_id=<id>).
+    Shop managers only see orders from their shop.
     """
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated, IsStaffMember]
 
     def get_queryset(self):
-        queryset = Order.objects.all().prefetch_related('items__food_item', 'user__userprofile').order_by('-created_at')
+        queryset = Order.objects.all().select_related(
+            'shop', 'user__userprofile'
+        ).prefetch_related(
+            'items__food_item',
+            'items__electronics_item',
+            'items__grocery_item'
+        ).order_by('-created_at')
+        
+        # Shop managers only see orders from their shop
+        try:
+            profile = self.request.user.userprofile
+            if profile.is_shop_manager and profile.shop:
+                queryset = queryset.filter(shop=profile.shop)
+        except UserProfile.DoesNotExist:
+            pass
+        
+        # Filter by shop_id if provided (for super admin)
+        shop_id = self.request.query_params.get('shop_id')
+        if shop_id:
+            queryset = queryset.filter(shop_id=shop_id)
+        
+        # Filter by status if provided
         status_filter = self.request.query_params.get('status')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+        
         return queryset
 
 
@@ -224,14 +430,26 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     lookup_url_kwarg = 'order_id'
 
     def get_queryset(self):
-        queryset = Order.objects.all().prefetch_related('items__food_item')
+        queryset = Order.objects.all().select_related('shop').prefetch_related(
+            'items__food_item',
+            'items__electronics_item',
+            'items__grocery_item'
+        )
         try:
-            role = self.request.user.userprofile.role
+            profile = self.request.user.userprofile
+            role = profile.role
+            # Shop managers can only see orders from their shop
+            if profile.is_shop_manager and profile.shop:
+                queryset = queryset.filter(shop=profile.shop)
+            elif role in [UserProfile.ROLE_SUPER_ADMIN, UserProfile.ROLE_EMPLOYEE, UserProfile.ROLE_COOK]:
+                # Super admin and staff can see all orders
+                pass
+            else:
+                # Students can only see their own orders
+                queryset = queryset.filter(user=self.request.user)
         except UserProfile.DoesNotExist:
-            role = None
-        if role in [UserProfile.ROLE_SUPER_ADMIN, UserProfile.ROLE_EMPLOYEE, UserProfile.ROLE_COOK]:
-            return queryset
-        return queryset.filter(user=self.request.user)
+            queryset = queryset.filter(user=self.request.user)
+        return queryset
 
     def get_serializer_class(self):
         if self.request.method in ('PATCH', 'PUT'):
@@ -244,7 +462,12 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
             role = self.request.user.userprofile.role
         except UserProfile.DoesNotExist:
             role = None
-        if 'status' in validated_data and role not in [UserProfile.ROLE_SUPER_ADMIN, UserProfile.ROLE_EMPLOYEE, UserProfile.ROLE_COOK]:
+        if 'status' in validated_data and role not in [
+            UserProfile.ROLE_SUPER_ADMIN,
+            UserProfile.ROLE_SHOP_MANAGER,
+            UserProfile.ROLE_EMPLOYEE,
+            UserProfile.ROLE_COOK
+        ]:
             raise PermissionDenied("You do not have permission to update order status.")
         serializer.save()
 
@@ -433,3 +656,40 @@ class DashboardSummaryView(APIView):
                 "top_items": top_items,
             }
         )
+
+
+class ShopListView(generics.ListAPIView):
+    """
+    GET  /api/shops/ → list shops
+    - Public (unauthenticated): shows only active shops
+    - Authenticated staff (super_admin, shop_manager): shows all shops for management
+    Shops are pre-configured and cannot be created via API.
+    """
+    serializer_class = ShopSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get_queryset(self):
+        # Check if user is authenticated and is staff
+        if self.request.user and self.request.user.is_authenticated:
+            try:
+                profile = self.request.user.userprofile
+                if profile.is_super_admin or profile.is_shop_manager:
+                    # Staff can see all shops (active and inactive) for management
+                    return Shop.objects.all().order_by('name')
+            except (AttributeError, UserProfile.DoesNotExist):
+                pass
+        
+        # Public endpoint shows only active shops
+        return Shop.objects.filter(is_active=True).order_by('name')
+
+
+class ShopDetailView(generics.RetrieveAPIView):
+    """
+    GET    /api/shops/<id>/ → retrieve shop details (read-only)
+    Shops are pre-configured and cannot be modified via API.
+    """
+    queryset = Shop.objects.filter(is_active=True)
+    serializer_class = ShopSerializer
+    permission_classes = [AllowAny]
+    authentication_classes = []

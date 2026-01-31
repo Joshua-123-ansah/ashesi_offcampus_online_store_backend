@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 import re
 from decimal import Decimal, ROUND_HALF_UP
 from rest_framework import serializers
-from api.models import FoodItems, UserProfile
+from api.models import FoodItems, UserProfile, Shop, ElectronicsItems, GroceryItems
 from .models import Order, OrderItem, Payment
 
 
@@ -69,7 +69,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    # we expose username, but don’t require it in input
+    # we expose username, but don't require it in input
     username               = serializers.CharField(source='user.username', read_only=True)
     first_name             = serializers.CharField(source='user.first_name', required=False)
     last_name              = serializers.CharField(source='user.last_name',  required=False)
@@ -78,6 +78,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
     hostel_or_office_name  = serializers.CharField(required=False)
     room_or_office_number  = serializers.CharField(required=False)
     role                   = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES, required=False)
+    shop_id                = serializers.PrimaryKeyRelatedField(
+                                 queryset=Shop.objects.all(),
+                                 source='shop',
+                                 allow_null=True,
+                                 required=False
+                              )
 
     class Meta:
         model  = UserProfile
@@ -90,6 +96,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'hostel_or_office_name',
             'room_or_office_number',
             'role',
+            'shop_id',
         ]
 
     def update(self, instance, validated_data):
@@ -102,10 +109,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
         # 2) update profile fields
         role = validated_data.pop('role', None)
+        shop = validated_data.pop('shop', None)  # Pop shop instance if present
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
 
         request = self.context.get('request')
+        
+        # Handle role update
         if role is not None:
             can_assign = (
                 request
@@ -115,6 +125,26 @@ class UserProfileSerializer(serializers.ModelSerializer):
             if not can_assign:
                 raise serializers.ValidationError({"role": "You do not have permission to change roles."})
             instance.role = role
+
+        # Handle shop assignment (only super admin can assign shops)
+        if shop is not None:
+            can_assign_shop = (
+                request
+                and getattr(request.user, 'userprofile', None)
+                and request.user.userprofile.is_super_admin
+            )
+            if not can_assign_shop:
+                raise serializers.ValidationError({"shop_id": "You do not have permission to assign shops."})
+            instance.shop = shop
+        elif 'shop' in validated_data and shop is None:  # If shop_id was explicitly set to null
+            can_assign_shop = (
+                request
+                and getattr(request.user, 'userprofile', None)
+                and request.user.userprofile.is_super_admin
+            )
+            if not can_assign_shop:
+                raise serializers.ValidationError({"shop_id": "You do not have permission to assign shops."})
+            instance.shop = None
 
         instance.save()
 
@@ -165,26 +195,124 @@ class PasswordResetSerializer(serializers.Serializer):
 
 
 
+class ShopSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Shop
+        fields = ['id', 'name', 'description', 'image', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class ShopListSerializer(serializers.ModelSerializer):
+    """Simplified serializer for listing shops"""
+    class Meta:
+        model = Shop
+        fields = ['id', 'name', 'description', 'image', 'is_active']
+
+
 class FoodSerializer(serializers.ModelSerializer):
+    shop = ShopListSerializer(read_only=True)
+    shop_id = serializers.PrimaryKeyRelatedField(
+        queryset=Shop.objects.filter(is_active=True),
+        source='shop',
+        write_only=True,
+        required=False
+    )
+
     class Meta:
         model = FoodItems
-        fields = ['id','name', 'price','image', 'status', 'extras']
+        fields = ['id', 'shop', 'shop_id', 'name', 'price', 'image', 'status', 'extras', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class ElectronicsSerializer(serializers.ModelSerializer):
+    shop = ShopListSerializer(read_only=True)
+    shop_id = serializers.PrimaryKeyRelatedField(
+        queryset=Shop.objects.filter(is_active=True),
+        source='shop',
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = ElectronicsItems
+        fields = ['id', 'shop', 'shop_id', 'name', 'price', 'image', 'status', 'created_at']
+        read_only_fields = ['created_at']
+
+
+class GrocerySerializer(serializers.ModelSerializer):
+    shop = ShopListSerializer(read_only=True)
+    shop_id = serializers.PrimaryKeyRelatedField(
+        queryset=Shop.objects.filter(is_active=True),
+        source='shop',
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = GroceryItems
+        fields = ['id', 'shop', 'shop_id', 'name', 'price', 'image', 'status', 'created_at']
+        read_only_fields = ['created_at']
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    food_item = serializers.PrimaryKeyRelatedField(queryset=FoodItems.objects.all())
+    # For writing - accept any of the three item types
+    food_item = serializers.PrimaryKeyRelatedField(
+        queryset=FoodItems.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    electronics_item = serializers.PrimaryKeyRelatedField(
+        queryset=ElectronicsItems.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    grocery_item = serializers.PrimaryKeyRelatedField(
+        queryset=GroceryItems.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    
+    # For reading - return the appropriate item detail
     food_item_detail = FoodSerializer(source='food_item', read_only=True)
+    electronics_item_detail = ElectronicsSerializer(source='electronics_item', read_only=True)
+    grocery_item_detail = GrocerySerializer(source='grocery_item', read_only=True)
+    
+    # Helper field to get item name
+    item_name = serializers.SerializerMethodField()
+    
+    def get_item_name(self, obj):
+        """Get the item name from the model property"""
+        return obj.item_name
 
     class Meta:
         model  = OrderItem
-        fields = ['food_item', 'quantity', 'price', 'food_item_detail']
-        read_only_fields = ['price', 'food_item_detail']
+        fields = [
+            'food_item', 'electronics_item', 'grocery_item',
+            'quantity', 'price',
+            'food_item_detail', 'electronics_item_detail', 'grocery_item_detail',
+            'item_name'
+        ]
+        read_only_fields = ['price', 'food_item_detail', 'electronics_item_detail', 'grocery_item_detail', 'item_name']
+
+    def validate(self, data):
+        """Ensure exactly one item type is provided"""
+        item_count = sum([
+            1 for key in ['food_item', 'electronics_item', 'grocery_item']
+            if data.get(key) is not None
+        ])
+        
+        if item_count != 1:
+            raise serializers.ValidationError(
+                "Exactly one of food_item, electronics_item, or grocery_item must be provided."
+            )
+        return data
 
 
 class OrderSerializer(serializers.ModelSerializer):
     items       = OrderItemSerializer(many=True, write_only=True)
     order_items = OrderItemSerializer(source='items', many=True, read_only=True)
     customer    = serializers.SerializerMethodField()
+    shop        = ShopListSerializer(read_only=True)  # Include shop information
 
     class Meta:
         model  = Order
@@ -194,31 +322,87 @@ class OrderSerializer(serializers.ModelSerializer):
             'total_price',
             'status',
             'customer',
+            'shop',        # Shop information
             'items',       # for POST
             'order_items', # for GET
         ]
-        read_only_fields = ['id', 'created_at', 'total_price', 'order_items', 'status', 'customer']
+        read_only_fields = ['id', 'created_at', 'total_price', 'order_items', 'status', 'customer', 'shop']
 
     def create(self, validated_data):
         items_data = validated_data.pop('items')
         user       = self.context['request'].user
 
+        if not items_data:
+            raise serializers.ValidationError({"items": "Order must contain at least one item."})
+
+        # Determine shop from first item (all items should be from same shop)
+        first_item_data = items_data[0]
+        shop = None
+        
+        if first_item_data.get('food_item'):
+            shop = first_item_data['food_item'].shop
+        elif first_item_data.get('electronics_item'):
+            shop = first_item_data['electronics_item'].shop
+        elif first_item_data.get('grocery_item'):
+            shop = first_item_data['grocery_item'].shop
+        
+        if not shop:
+            raise serializers.ValidationError({"items": "Items must be assigned to a shop."})
+
+        # Validate all items are from the same shop
+        for item_data in items_data:
+            item_shop = None
+            if item_data.get('food_item'):
+                item_shop = item_data['food_item'].shop
+            elif item_data.get('electronics_item'):
+                item_shop = item_data['electronics_item'].shop
+            elif item_data.get('grocery_item'):
+                item_shop = item_data['grocery_item'].shop
+            
+            if item_shop != shop:
+                raise serializers.ValidationError({"items": "All items must be from the same shop."})
+
         # 1) Create the order header
-        order = Order.objects.create(user=user)
+        order = Order.objects.create(user=user, shop=shop)
 
         # 2) Populate the line items & tally total
         total = Decimal('0.00')
-        for item in items_data:
-            food = item['food_item']
-            qty  = item['quantity']
-            food_price = Decimal(str(food.price))
-            line_price = (food_price * Decimal(qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            OrderItem.objects.create(
-                order     = order,
-                food_item = food,
-                quantity  = qty,
-                price     = line_price
-            )
+        for item_data in items_data:
+            qty = item_data['quantity']
+            line_price = Decimal('0.00')
+            
+            # Determine which item type and calculate price
+            if item_data.get('food_item'):
+                item = item_data['food_item']
+                item_price = Decimal(str(item.price))
+                line_price = (item_price * Decimal(qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                OrderItem.objects.create(
+                    order=order,
+                    food_item=item,
+                    quantity=qty,
+                    price=line_price
+                )
+            elif item_data.get('electronics_item'):
+                item = item_data['electronics_item']
+                item_price = Decimal(str(item.price))
+                line_price = (item_price * Decimal(qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                OrderItem.objects.create(
+                    order=order,
+                    electronics_item=item,
+                    quantity=qty,
+                    price=line_price
+                )
+            elif item_data.get('grocery_item'):
+                item = item_data['grocery_item']
+                item_price = Decimal(str(item.price))
+                line_price = (item_price * Decimal(qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                OrderItem.objects.create(
+                    order=order,
+                    grocery_item=item,
+                    quantity=qty,
+                    price=line_price
+                )
+            
             total += line_price
 
         # 3) Add delivery fee
