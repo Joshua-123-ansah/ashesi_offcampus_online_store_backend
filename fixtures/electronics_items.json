@@ -1,0 +1,14 @@
+[
+{
+  "model": "api.electronicsitems",
+  "pk": 1,
+  "fields": {
+    "shop": 2,
+    "name": "Iphone Type C Cord",
+    "price": 50.0,
+    "image": "hhh",
+    "status": true,
+    "created_at": "2025-12-14T23:36:44.790Z"
+  }
+}
+]

@@ -1,0 +1,41 @@
+[
+{
+  "model": "api.fooditems",
+  "pk": 1,
+  "fields": {
+    "shop": 1,
+    "name": "Jollof Rice and Chicken",
+    "price": 40.0,
+    "image": "https://zenaskitchen.com/wp-content/uploads/2022/12/jollof-rice.jpg",
+    "status": true,
+    "extras": "",
+    "created_at": "2025-04-23T07:14:13.329Z"
+  }
+},
+{
+  "model": "api.fooditems",
+  "pk": 2,
+  "fields": {
+    "shop": 1,
+    "name": "Fried Rice and Chicken Regular",
+    "price": 40.0,
+    "image": "https://allnigerianfoods.com/wp-content/uploads/fried_rice_recipe-500x361.jpg",
+    "status": true,
+    "extras": "",
+    "created_at": "2025-04-29T02:24:57.053Z"
+  }
+},
+{
+  "model": "api.fooditems",
+  "pk": 3,
+  "fields": {
+    "shop": 1,
+    "name": "Chicken Shawarma",
+    "price": 50.0,
+    "image": "https://lifeloveandgoodfood.com/wp-content/uploads/2020/04/Chicken-Shawarma_09_1200x1200.jpg",
+    "status": true,
+    "extras": "",
+    "created_at": "2025-04-29T02:49:09.387Z"
+  }
+}
+]
