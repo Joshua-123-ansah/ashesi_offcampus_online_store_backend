@@ -41,6 +41,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "EXCEPTION_HANDLER": "api.exceptions.api_exception_handler",
 }
 
 SIMPLE_JWT = {
@@ -153,13 +154,17 @@ CORS_ALLOWS_CREDENTIALS = True
 DEFAULT_CHARSET = 'utf-8'
 EMAIL_CHARSET   = 'utf-8'
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
+# Real email via SMTP. Set EMAIL_SSL_VERIFY=0 in .env if you get SSL cert errors (dev only).
+if os.getenv('EMAIL_SSL_VERIFY', '1') == '0':
+    EMAIL_BACKEND = 'api.email_backend.SMTPBackendNoVerify'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
-EMAIL_HOST_PASSWORD =  os.getenv('EMAIL_HOST_PASSWORD')
-DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('EMAIL_HOST_USER', 'noreply@localhost')
 
 # Paystack integration settings
 PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY')
