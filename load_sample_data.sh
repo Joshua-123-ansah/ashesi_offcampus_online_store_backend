@@ -30,16 +30,18 @@ fi
 
 # Run migrations first to ensure database schema is up to date
 echo "  → Running migrations..."
-if ! python manage.py migrate 2>&1; then
+migrate_out=$(python manage.py migrate 2>&1)
+migrate_ok=$?
+if [ "$migrate_ok" -ne 0 ]; then
     # Duplicate migration branch: second 0010 also creates api_shop; fake it and retry
-    if python manage.py migrate api 0010_shop_alter_fooditems_options_and_more --fake 2>/dev/null; then
-        echo "  → Re-running migrations after faking duplicate 0010..."
+    if echo "$migrate_out" | grep -q "api_shop.*already exists"; then
+        echo "  → Fixing duplicate migration, then re-running..."
+        python manage.py migrate api 0010_shop_alter_fooditems_options_and_more --fake 2>/dev/null
         python manage.py migrate || exit 1
     else
+        echo "$migrate_out"
         echo ""
-        echo "❌ Migrate failed. If you see 'table api_shop already exists', run:"
-        echo "   ./load_sample_data.sh --fresh"
-        echo "   (or delete db.sqlite3, then run this script again)"
+        echo "❌ Migrate failed. Try: ./load_sample_data.sh --fresh"
         exit 1
     fi
 fi
